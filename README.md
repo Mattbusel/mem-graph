@@ -42,6 +42,12 @@ for (entity, rel) in neighbors {
 mem-graph = { git = "https://github.com/Mattbusel/mem-graph" }
 ```
 
+Or one-liner:
+
+```ash
+cargo add --git https://github.com/Mattbusel/mem-graph
+```
+
 ## Test coverage
 
 ```bash
