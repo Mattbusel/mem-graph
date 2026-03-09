@@ -1,23 +1,23 @@
 # mem-graph
 
-Knowledge graph primitives — entities, typed relationships, properties, and BFS/DFS traversal.
+Knowledge graph primitives -- entities, typed relationships, properties, and BFS/DFS traversal.
 
 A lightweight in-memory graph store for agent knowledge bases, tool dependency graphs, and semantic memory backends.
 
 ## What's inside
 
-- **Entity** — typed nodes with arbitrary property maps
-- **Relation** — directed, typed edges between entities
-- **Graph** — adjacency-list store with O(1) neighbor lookup
-- **BFS / DFS traversal** — depth-limited graph search with visitor pattern
-- **Query** — filter by entity type, relation type, property value
+- **Entity** -- typed nodes with arbitrary property maps
+- **Relation** -- directed, typed edges between entities
+- **Graph** -- adjacency-list store with O(1) neighbor lookup
+- **BFS / DFS traversal** -- depth-limited graph search with visitor pattern
+- **Query** -- filter by entity type, relation type, property value
 
 ## Use cases
 
-- Agent knowledge bases — store facts as (subject, predicate, object) triples
-- Tool dependency graphs — model which tools require which capabilities
-- Semantic memory backend — back `tokio-agent-memory`'s semantic tier with a real graph
-- Reasoning traces — record thought chains as a navigable graph
+- Agent knowledge bases -- store facts as (subject, predicate, object) triples
+- Tool dependency graphs -- model which tools require which capabilities
+- Semantic memory backend -- back `tokio-agent-memory`'s semantic tier with a real graph
+- Reasoning traces -- record thought chains as a navigable graph
 
 ## Quick start
 
@@ -31,7 +31,7 @@ g.add_relation(paris, france, Relation::new("capital_of"));
 
 let neighbors = g.neighbors(paris);
 for (entity, rel) in neighbors {
-    println!("{} --[{}]--> {}", "Paris", rel.kind, entity.name);
+ println!("{} --[{}]--> {}", "Paris", rel.kind, entity.name);
 }
 ```
 
