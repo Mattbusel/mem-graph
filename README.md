@@ -1,6 +1,6 @@
 # mem-graph
 
-[![CI](https://github.com/Mattbusel/mem-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/Mattbusel/mem-graph/actions/workflows/ci.yml)
+
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A small in-memory knowledge graph for Rust agents: typed entities and relationships with properties, BFS/DFS, shortest path, transitive closure, time-bounded edges, and JSON snapshots.
@@ -27,7 +27,7 @@ mem-graph = { git = "https://gitlab.com/mattbusel/mem-graph" }
 or
 
 ```bash
-cargo add --git https://github.com/Mattbusel/mem-graph mem-graph
+cargo add --git https://gitlab.com/mattbusel/mem-graph mem-graph
 ```
 
 ## Example
@@ -94,4 +94,4 @@ MIT, see [LICENSE](LICENSE).
 
 ---
 
-Part of a set of Rust crates for LLM agents, see [rust-crates](https://github.com/Mattbusel/rust-crates).
+Part of a set of Rust crates for LLM agents, see [rust-crates](https://gitlab.com/mattbusel/rust-crates).
