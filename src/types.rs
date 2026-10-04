@@ -218,8 +218,8 @@ mod tests {
 
     #[test]
     fn test_prop_value_as_number_ok() {
-        let v = PropValue::Number(3.14);
-        assert!((v.as_number().unwrap() - 3.14).abs() < 1e-9);
+        let v = PropValue::Number(2.5);
+        assert!((v.as_number().unwrap() - 2.5).abs() < 1e-9);
     }
 
     #[test]

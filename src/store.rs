@@ -293,235 +293,6 @@ impl Default for GraphStore {
     fn default() -> Self { Self::new() }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::Entity;
-
-    fn e(id: &str) -> Entity { Entity::new(EntityId::new(id), "Node") }
-
-    fn store_with_chain() -> GraphStore {
-        let mut g = GraphStore::new();
-        g.add_entity(e("a")).unwrap();
-        g.add_entity(e("b")).unwrap();
-        g.add_entity(e("c")).unwrap();
-        g.add_relationship(Relationship::new(EntityId::new("a"), EntityId::new("b"), "links")).unwrap();
-        g.add_relationship(Relationship::new(EntityId::new("b"), EntityId::new("c"), "links")).unwrap();
-        g
-    }
-
-    #[test]
-    fn test_store_add_entity_ok() {
-        let mut g = GraphStore::new();
-        assert!(g.add_entity(e("x")).is_ok());
-        assert_eq!(g.entity_count(), 1);
-    }
-
-    #[test]
-    fn test_store_duplicate_entity_returns_error() {
-        let mut g = GraphStore::new();
-        g.add_entity(e("x")).unwrap();
-        let err = g.add_entity(e("x")).unwrap_err();
-        assert!(matches!(err, GraphError::DuplicateEntity(_)));
-    }
-
-    #[test]
-    fn test_store_get_entity_ok() {
-        let mut g = GraphStore::new();
-        g.add_entity(e("x")).unwrap();
-        assert!(g.get_entity(&EntityId::new("x")).is_ok());
-    }
-
-    #[test]
-    fn test_store_get_entity_not_found_returns_error() {
-        let g = GraphStore::new();
-        let err = g.get_entity(&EntityId::new("missing")).unwrap_err();
-        assert!(matches!(err, GraphError::EntityNotFound(_)));
-    }
-
-    #[test]
-    fn test_store_add_relationship_missing_from_entity_returns_error() {
-        let mut g = GraphStore::new();
-        g.add_entity(e("b")).unwrap();
-        let err = g.add_relationship(
-            Relationship::new(EntityId::new("z"), EntityId::new("b"), "r")
-        ).unwrap_err();
-        assert!(matches!(err, GraphError::EntityNotFound(_)));
-    }
-
-    #[test]
-    fn test_store_add_relationship_missing_to_entity_returns_error() {
-        let mut g = GraphStore::new();
-        g.add_entity(e("a")).unwrap();
-        let err = g.add_relationship(
-            Relationship::new(EntityId::new("a"), EntityId::new("z"), "r")
-        ).unwrap_err();
-        assert!(matches!(err, GraphError::EntityNotFound(_)));
-    }
-
-    #[test]
-    fn test_store_duplicate_relationship_returns_error() {
-        let mut g = GraphStore::new();
-        g.add_entity(e("a")).unwrap();
-        g.add_entity(e("b")).unwrap();
-        g.add_relationship(Relationship::new(EntityId::new("a"), EntityId::new("b"), "r")).unwrap();
-        let err = g.add_relationship(
-            Relationship::new(EntityId::new("a"), EntityId::new("b"), "r")
-        ).unwrap_err();
-        assert!(matches!(err, GraphError::DuplicateRelationship { .. }));
-    }
-
-    #[test]
-    fn test_store_neighbors_out_correct_count() {
-        let g = store_with_chain();
-        let neighbors = g.neighbors_out(&EntityId::new("a"));
-        assert_eq!(neighbors.len(), 1);
-        assert_eq!(neighbors[0].0.id.0, "b");
-    }
-
-    #[test]
-    fn test_store_neighbors_in_correct_count() {
-        let g = store_with_chain();
-        let neighbors = g.neighbors_in(&EntityId::new("b"));
-        assert_eq!(neighbors.len(), 1);
-        assert_eq!(neighbors[0].0.id.0, "a");
-    }
-
-    #[test]
-    fn test_store_neighbors_empty_for_leaf() {
-        let g = store_with_chain();
-        let out = g.neighbors_out(&EntityId::new("c"));
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn test_store_bfs_visits_all_nodes() {
-        let g = store_with_chain();
-        let visited = g.bfs(&EntityId::new("a"), 10).unwrap();
-        assert_eq!(visited.len(), 3);
-    }
-
-    #[test]
-    fn test_store_bfs_respects_depth_limit() {
-        let g = store_with_chain();
-        let visited = g.bfs(&EntityId::new("a"), 1).unwrap();
-        // depth=0: a, depth=1: b (stops before c)
-        assert_eq!(visited.len(), 2);
-    }
-
-    #[test]
-    fn test_store_bfs_unknown_start_returns_error() {
-        let g = GraphStore::new();
-        let err = g.bfs(&EntityId::new("x"), 5).unwrap_err();
-        assert!(matches!(err, GraphError::EntityNotFound(_)));
-    }
-
-    #[test]
-    fn test_store_dfs_visits_all_nodes() {
-        let g = store_with_chain();
-        let visited = g.dfs(&EntityId::new("a"), 10).unwrap();
-        assert_eq!(visited.len(), 3);
-    }
-
-    #[test]
-    fn test_store_dfs_unknown_start_returns_error() {
-        let g = GraphStore::new();
-        let err = g.dfs(&EntityId::new("x"), 5).unwrap_err();
-        assert!(matches!(err, GraphError::EntityNotFound(_)));
-    }
-
-    #[test]
-    fn test_store_shortest_path_direct() {
-        let g = store_with_chain();
-        let path = g.shortest_path(&EntityId::new("a"), &EntityId::new("b")).unwrap();
-        assert_eq!(path.unwrap().len(), 2);
-    }
-
-    #[test]
-    fn test_store_shortest_path_two_hops() {
-        let g = store_with_chain();
-        let path = g.shortest_path(&EntityId::new("a"), &EntityId::new("c")).unwrap();
-        assert_eq!(path.unwrap().len(), 3);
-    }
-
-    #[test]
-    fn test_store_shortest_path_self_is_trivial() {
-        let mut g = GraphStore::new();
-        g.add_entity(e("x")).unwrap();
-        let path = g.shortest_path(&EntityId::new("x"), &EntityId::new("x")).unwrap();
-        assert_eq!(path.unwrap().len(), 1);
-    }
-
-    #[test]
-    fn test_store_shortest_path_no_path_returns_none() {
-        let mut g = GraphStore::new();
-        g.add_entity(e("x")).unwrap();
-        g.add_entity(e("y")).unwrap();
-        let path = g.shortest_path(&EntityId::new("x"), &EntityId::new("y")).unwrap();
-        assert!(path.is_none());
-    }
-
-    #[test]
-    fn test_store_shortest_path_missing_from_returns_error() {
-        let mut g = GraphStore::new();
-        g.add_entity(e("y")).unwrap();
-        let err = g.shortest_path(&EntityId::new("x"), &EntityId::new("y")).unwrap_err();
-        assert!(matches!(err, GraphError::EntityNotFound(_)));
-    }
-
-    #[test]
-    fn test_store_shortest_path_missing_to_returns_error() {
-        let mut g = GraphStore::new();
-        g.add_entity(e("x")).unwrap();
-        let err = g.shortest_path(&EntityId::new("x"), &EntityId::new("y")).unwrap_err();
-        assert!(matches!(err, GraphError::EntityNotFound(_)));
-    }
-
-    #[test]
-    fn test_store_transitive_closure_includes_all_reachable() {
-        let g = store_with_chain();
-        let closure = g.transitive_closure(&EntityId::new("a")).unwrap();
-        assert!(closure.contains("a"));
-        assert!(closure.contains("b"));
-        assert!(closure.contains("c"));
-    }
-
-    #[test]
-    fn test_store_transitive_closure_unknown_start_returns_error() {
-        let g = GraphStore::new();
-        let err = g.transitive_closure(&EntityId::new("x")).unwrap_err();
-        assert!(matches!(err, GraphError::EntityNotFound(_)));
-    }
-
-    #[test]
-    fn test_store_get_relationship_ok() {
-        let g = store_with_chain();
-        let rel = g.get_relationship(&EntityId::new("a"), &EntityId::new("b"), "links");
-        assert!(rel.is_ok());
-    }
-
-    #[test]
-    fn test_store_get_relationship_not_found_returns_error() {
-        let g = store_with_chain();
-        let err = g.get_relationship(
-            &EntityId::new("a"), &EntityId::new("c"), "direct"
-        ).unwrap_err();
-        assert!(matches!(err, GraphError::RelationshipNotFound { .. }));
-    }
-
-    #[test]
-    fn test_store_edge_count_correct() {
-        let g = store_with_chain();
-        assert_eq!(g.edge_count(), 2);
-    }
-
-    #[test]
-    fn test_store_default_is_empty() {
-        let g = GraphStore::default();
-        assert_eq!(g.entity_count(), 0);
-        assert_eq!(g.edge_count(), 0);
-    }
-}
 
 // ── Updates, snapshots and point-in-time queries ─────────────────────────────
 
@@ -787,5 +558,235 @@ impl GraphStore {
             |_| 0.0,
         );
         Ok(found.map(|(total, path)| (total, path.into_iter().map(|n| graph[n].id.clone()).collect())))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::Entity;
+
+    fn e(id: &str) -> Entity { Entity::new(EntityId::new(id), "Node") }
+
+    fn store_with_chain() -> GraphStore {
+        let mut g = GraphStore::new();
+        g.add_entity(e("a")).unwrap();
+        g.add_entity(e("b")).unwrap();
+        g.add_entity(e("c")).unwrap();
+        g.add_relationship(Relationship::new(EntityId::new("a"), EntityId::new("b"), "links")).unwrap();
+        g.add_relationship(Relationship::new(EntityId::new("b"), EntityId::new("c"), "links")).unwrap();
+        g
+    }
+
+    #[test]
+    fn test_store_add_entity_ok() {
+        let mut g = GraphStore::new();
+        assert!(g.add_entity(e("x")).is_ok());
+        assert_eq!(g.entity_count(), 1);
+    }
+
+    #[test]
+    fn test_store_duplicate_entity_returns_error() {
+        let mut g = GraphStore::new();
+        g.add_entity(e("x")).unwrap();
+        let err = g.add_entity(e("x")).unwrap_err();
+        assert!(matches!(err, GraphError::DuplicateEntity(_)));
+    }
+
+    #[test]
+    fn test_store_get_entity_ok() {
+        let mut g = GraphStore::new();
+        g.add_entity(e("x")).unwrap();
+        assert!(g.get_entity(&EntityId::new("x")).is_ok());
+    }
+
+    #[test]
+    fn test_store_get_entity_not_found_returns_error() {
+        let g = GraphStore::new();
+        let err = g.get_entity(&EntityId::new("missing")).unwrap_err();
+        assert!(matches!(err, GraphError::EntityNotFound(_)));
+    }
+
+    #[test]
+    fn test_store_add_relationship_missing_from_entity_returns_error() {
+        let mut g = GraphStore::new();
+        g.add_entity(e("b")).unwrap();
+        let err = g.add_relationship(
+            Relationship::new(EntityId::new("z"), EntityId::new("b"), "r")
+        ).unwrap_err();
+        assert!(matches!(err, GraphError::EntityNotFound(_)));
+    }
+
+    #[test]
+    fn test_store_add_relationship_missing_to_entity_returns_error() {
+        let mut g = GraphStore::new();
+        g.add_entity(e("a")).unwrap();
+        let err = g.add_relationship(
+            Relationship::new(EntityId::new("a"), EntityId::new("z"), "r")
+        ).unwrap_err();
+        assert!(matches!(err, GraphError::EntityNotFound(_)));
+    }
+
+    #[test]
+    fn test_store_duplicate_relationship_returns_error() {
+        let mut g = GraphStore::new();
+        g.add_entity(e("a")).unwrap();
+        g.add_entity(e("b")).unwrap();
+        g.add_relationship(Relationship::new(EntityId::new("a"), EntityId::new("b"), "r")).unwrap();
+        let err = g.add_relationship(
+            Relationship::new(EntityId::new("a"), EntityId::new("b"), "r")
+        ).unwrap_err();
+        assert!(matches!(err, GraphError::DuplicateRelationship { .. }));
+    }
+
+    #[test]
+    fn test_store_neighbors_out_correct_count() {
+        let g = store_with_chain();
+        let neighbors = g.neighbors_out(&EntityId::new("a"));
+        assert_eq!(neighbors.len(), 1);
+        assert_eq!(neighbors[0].0.id.0, "b");
+    }
+
+    #[test]
+    fn test_store_neighbors_in_correct_count() {
+        let g = store_with_chain();
+        let neighbors = g.neighbors_in(&EntityId::new("b"));
+        assert_eq!(neighbors.len(), 1);
+        assert_eq!(neighbors[0].0.id.0, "a");
+    }
+
+    #[test]
+    fn test_store_neighbors_empty_for_leaf() {
+        let g = store_with_chain();
+        let out = g.neighbors_out(&EntityId::new("c"));
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn test_store_bfs_visits_all_nodes() {
+        let g = store_with_chain();
+        let visited = g.bfs(&EntityId::new("a"), 10).unwrap();
+        assert_eq!(visited.len(), 3);
+    }
+
+    #[test]
+    fn test_store_bfs_respects_depth_limit() {
+        let g = store_with_chain();
+        let visited = g.bfs(&EntityId::new("a"), 1).unwrap();
+        // depth=0: a, depth=1: b (stops before c)
+        assert_eq!(visited.len(), 2);
+    }
+
+    #[test]
+    fn test_store_bfs_unknown_start_returns_error() {
+        let g = GraphStore::new();
+        let err = g.bfs(&EntityId::new("x"), 5).unwrap_err();
+        assert!(matches!(err, GraphError::EntityNotFound(_)));
+    }
+
+    #[test]
+    fn test_store_dfs_visits_all_nodes() {
+        let g = store_with_chain();
+        let visited = g.dfs(&EntityId::new("a"), 10).unwrap();
+        assert_eq!(visited.len(), 3);
+    }
+
+    #[test]
+    fn test_store_dfs_unknown_start_returns_error() {
+        let g = GraphStore::new();
+        let err = g.dfs(&EntityId::new("x"), 5).unwrap_err();
+        assert!(matches!(err, GraphError::EntityNotFound(_)));
+    }
+
+    #[test]
+    fn test_store_shortest_path_direct() {
+        let g = store_with_chain();
+        let path = g.shortest_path(&EntityId::new("a"), &EntityId::new("b")).unwrap();
+        assert_eq!(path.unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_store_shortest_path_two_hops() {
+        let g = store_with_chain();
+        let path = g.shortest_path(&EntityId::new("a"), &EntityId::new("c")).unwrap();
+        assert_eq!(path.unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_store_shortest_path_self_is_trivial() {
+        let mut g = GraphStore::new();
+        g.add_entity(e("x")).unwrap();
+        let path = g.shortest_path(&EntityId::new("x"), &EntityId::new("x")).unwrap();
+        assert_eq!(path.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_store_shortest_path_no_path_returns_none() {
+        let mut g = GraphStore::new();
+        g.add_entity(e("x")).unwrap();
+        g.add_entity(e("y")).unwrap();
+        let path = g.shortest_path(&EntityId::new("x"), &EntityId::new("y")).unwrap();
+        assert!(path.is_none());
+    }
+
+    #[test]
+    fn test_store_shortest_path_missing_from_returns_error() {
+        let mut g = GraphStore::new();
+        g.add_entity(e("y")).unwrap();
+        let err = g.shortest_path(&EntityId::new("x"), &EntityId::new("y")).unwrap_err();
+        assert!(matches!(err, GraphError::EntityNotFound(_)));
+    }
+
+    #[test]
+    fn test_store_shortest_path_missing_to_returns_error() {
+        let mut g = GraphStore::new();
+        g.add_entity(e("x")).unwrap();
+        let err = g.shortest_path(&EntityId::new("x"), &EntityId::new("y")).unwrap_err();
+        assert!(matches!(err, GraphError::EntityNotFound(_)));
+    }
+
+    #[test]
+    fn test_store_transitive_closure_includes_all_reachable() {
+        let g = store_with_chain();
+        let closure = g.transitive_closure(&EntityId::new("a")).unwrap();
+        assert!(closure.contains("a"));
+        assert!(closure.contains("b"));
+        assert!(closure.contains("c"));
+    }
+
+    #[test]
+    fn test_store_transitive_closure_unknown_start_returns_error() {
+        let g = GraphStore::new();
+        let err = g.transitive_closure(&EntityId::new("x")).unwrap_err();
+        assert!(matches!(err, GraphError::EntityNotFound(_)));
+    }
+
+    #[test]
+    fn test_store_get_relationship_ok() {
+        let g = store_with_chain();
+        let rel = g.get_relationship(&EntityId::new("a"), &EntityId::new("b"), "links");
+        assert!(rel.is_ok());
+    }
+
+    #[test]
+    fn test_store_get_relationship_not_found_returns_error() {
+        let g = store_with_chain();
+        let err = g.get_relationship(
+            &EntityId::new("a"), &EntityId::new("c"), "direct"
+        ).unwrap_err();
+        assert!(matches!(err, GraphError::RelationshipNotFound { .. }));
+    }
+
+    #[test]
+    fn test_store_edge_count_correct() {
+        let g = store_with_chain();
+        assert_eq!(g.edge_count(), 2);
+    }
+
+    #[test]
+    fn test_store_default_is_empty() {
+        let g = GraphStore::default();
+        assert_eq!(g.entity_count(), 0);
+        assert_eq!(g.edge_count(), 0);
     }
 }
