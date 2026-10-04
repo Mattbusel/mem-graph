@@ -12,8 +12,11 @@ Agents that remember facts ("Alice works at Acme", "Acme is in Berlin") need som
 - **Entities** (`Entity`, `EntityId`) with a kind and typed properties (`PropValue::Text / Number / Bool / Timestamp / List`) plus checked accessors (`as_text`, `as_number`, `as_bool`).
 - **Directed, typed relationships** (`Relationship`) with their own properties and an optional validity window (`with_temporal`, `is_valid_at`) for facts that change over time.
 - **Integrity checks**: adding an edge to a missing entity, or a duplicate entity or edge, returns a typed `GraphError`.
+- **Updates**: `remove_entity` (its relationships go with it), `remove_relationship`, `upsert_entity` (replace properties, keep edges).
 - **Queries**: `neighbors_out`, `neighbors_in`, `bfs` and `dfs` with a depth limit, `shortest_path` (BFS, unweighted), `transitive_closure`.
-- **Snapshots**: `GraphSnapshot` serializes entities and relationships to JSON and restores them into a `GraphStore`.
+- **Point-in-time queries**: `neighbors_out_at`, `bfs_at` and `shortest_path_at` only follow relationships valid at a given moment, so you can ask where Bob worked last year.
+- **Snapshots**: `store.snapshot()` gives a `GraphSnapshot` that serializes to JSON and restores into a `GraphStore`.
+- **petgraph** (`petgraph` feature): `to_petgraph` / `from_petgraph` to run any [petgraph](https://crates.io/crates/petgraph) algorithm, and `shortest_path_weighted` (cheapest path by a numeric edge property).
 
 ## Install
 
@@ -65,6 +68,43 @@ fn main() -> Result<(), GraphError> {
 }
 ```
 
+## Facts that change over time
+
+```rust
+use chrono::{Duration, Utc};
+use mem_graph::{Entity, EntityId, GraphStore, Relationship};
+
+let mut g = GraphStore::new();
+for (id, kind) in [("bob", "Person"), ("globex", "Company"), ("acme", "Company")] {
+    g.add_entity(Entity::new(EntityId::new(id), kind)).unwrap();
+}
+let now = Utc::now();
+let switched = now - Duration::days(30);
+g.add_relationship(Relationship::new(EntityId::new("bob"), EntityId::new("globex"), "works_at")
+    .with_temporal(now - Duration::days(1000), Some(switched))).unwrap();
+g.add_relationship(Relationship::new(EntityId::new("bob"), EntityId::new("acme"), "works_at")
+    .with_temporal(switched, None)).unwrap();
+
+let employer_at = |t| g.neighbors_out_at(&EntityId::new("bob"), t)[0].0.id.0.clone();
+assert_eq!(employer_at(now - Duration::days(365)), "globex");
+assert_eq!(employer_at(now), "acme");
+```
+
+## Weighted paths and petgraph algorithms
+
+```toml
+mem-graph = { git = "https://gitlab.com/mattbusel/mem-graph", features = ["petgraph"] }
+```
+
+```rust,ignore
+// Cheapest route by the "km" property on each relationship (1.0 when missing).
+let (km, path) = g.shortest_path_weighted(&EntityId::new("a"), &EntityId::new("d"), "km")?.unwrap();
+
+// Or hand the graph to petgraph: cycles, topological order, PageRank and more.
+let (pg, nodes) = g.to_petgraph();
+let cycles = petgraph::algo::tarjan_scc(&pg);
+```
+
 ## How it works
 
 | File | What it holds |
@@ -76,15 +116,13 @@ fn main() -> Result<(), GraphError> {
 
 ## Status and limitations
 
-Version 0.1, in-memory only.
+Version 0.2, in-memory only (persist with `snapshot().to_json()`).
 
-- There are no delete operations yet.
-- `GraphSnapshot` is filled by hand (its `entities` and `relationships` fields are public); there is no `GraphStore::snapshot()` helper.
-- Traversals ignore the temporal window; filter with `Relationship::is_valid_at` yourself.
+- `bfs`, `dfs` and `shortest_path` see every relationship; use the `_at` variants to respect validity windows.
 - Requires Rust 1.82 or newer (`Option::is_none_or`).
 
 ```bash
-cargo test
+cargo test --all-features
 cargo bench
 ```
 

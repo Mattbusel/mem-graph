@@ -29,3 +29,8 @@ pub mod types;
 pub use error::GraphError;
 pub use store::GraphStore;
 pub use types::{Entity, EntityId, PropValue, Relationship};
+
+/// Every Rust example in the README is compiled by `cargo test --doc`.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+mod readme_examples {}

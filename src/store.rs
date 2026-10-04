@@ -522,3 +522,270 @@ mod tests {
         assert_eq!(g.edge_count(), 0);
     }
 }
+
+// ── Updates, snapshots and point-in-time queries ─────────────────────────────
+
+impl GraphStore {
+    /// Remove an entity and every relationship that starts or ends at it.
+    ///
+    /// # Errors
+    /// [`GraphError::EntityNotFound`] if there is no such entity.
+    pub fn remove_entity(&mut self, id: &EntityId) -> Result<Entity, GraphError> {
+        let entity = self
+            .entities
+            .remove(id.as_str())
+            .ok_or_else(|| GraphError::EntityNotFound(id.0.clone()))?;
+        for (to, rt) in self.out_edges.remove(id.as_str()).unwrap_or_default() {
+            self.edges.remove(&(id.0.clone(), to.clone(), rt.clone()));
+            if let Some(list) = self.in_edges.get_mut(&to) {
+                list.retain(|(f, r)| !(f == id.as_str() && r == &rt));
+            }
+        }
+        for (from, rt) in self.in_edges.remove(id.as_str()).unwrap_or_default() {
+            self.edges.remove(&(from.clone(), id.0.clone(), rt.clone()));
+            if let Some(list) = self.out_edges.get_mut(&from) {
+                list.retain(|(t, r)| !(t == id.as_str() && r == &rt));
+            }
+        }
+        Ok(entity)
+    }
+
+    /// Remove one relationship.
+    ///
+    /// # Errors
+    /// [`GraphError::RelationshipNotFound`] if there is no such relationship.
+    pub fn remove_relationship(
+        &mut self,
+        from: &EntityId,
+        to: &EntityId,
+        rel_type: &str,
+    ) -> Result<Relationship, GraphError> {
+        let key = (from.0.clone(), to.0.clone(), rel_type.to_string());
+        let rel = self.edges.remove(&key).ok_or_else(|| GraphError::RelationshipNotFound {
+            from: from.0.clone(),
+            to: to.0.clone(),
+            rel: rel_type.to_string(),
+        })?;
+        if let Some(list) = self.out_edges.get_mut(from.as_str()) {
+            list.retain(|(t, r)| !(t == to.as_str() && r == rel_type));
+        }
+        if let Some(list) = self.in_edges.get_mut(to.as_str()) {
+            list.retain(|(f, r)| !(f == from.as_str() && r == rel_type));
+        }
+        Ok(rel)
+    }
+
+    /// Insert an entity, or replace the one with the same id (its
+    /// relationships are kept). Returns the previous version.
+    pub fn upsert_entity(&mut self, entity: Entity) -> Option<Entity> {
+        self.entities.insert(entity.id.0.clone(), entity)
+    }
+
+    /// All entities, in no particular order.
+    pub fn entities(&self) -> impl Iterator<Item = &Entity> {
+        self.entities.values()
+    }
+
+    /// All relationships, in no particular order.
+    pub fn relationships(&self) -> impl Iterator<Item = &Relationship> {
+        self.edges.values()
+    }
+
+    /// Copy the whole graph into a [`GraphSnapshot`](crate::serial::GraphSnapshot)
+    /// (for `to_json` and `restore_into`).
+    pub fn snapshot(&self) -> crate::serial::GraphSnapshot {
+        crate::serial::GraphSnapshot {
+            entities: self.entities.values().cloned().collect(),
+            relationships: self.edges.values().cloned().collect(),
+        }
+    }
+
+    fn edge(&self, from: &str, to: &str, rel_type: &str) -> Option<&Relationship> {
+        self.edges.get(&(from.to_string(), to.to_string(), rel_type.to_string()))
+    }
+
+    /// Outgoing neighbors through relationships valid at time `t`
+    /// (see [`Relationship::is_valid_at`]).
+    pub fn neighbors_out_at(
+        &self,
+        id: &EntityId,
+        t: chrono::DateTime<chrono::Utc>,
+    ) -> Vec<(&Entity, &Relationship)> {
+        self.out_edges
+            .get(id.as_str())
+            .into_iter()
+            .flatten()
+            .filter_map(|(to, rt)| {
+                let rel = self.edge(id.as_str(), to, rt)?;
+                let entity = self.entities.get(to.as_str())?;
+                rel.is_valid_at(t).then_some((entity, rel))
+            })
+            .collect()
+    }
+
+    /// [`bfs`](Self::bfs) that only follows relationships valid at time `t`:
+    /// the graph as it was (or will be) at that moment.
+    ///
+    /// # Errors
+    /// [`GraphError::EntityNotFound`] if `start` is not in the store.
+    pub fn bfs_at(
+        &self,
+        start: &EntityId,
+        max_depth: usize,
+        t: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<EntityId>, GraphError> {
+        if !self.entities.contains_key(start.as_str()) {
+            return Err(GraphError::EntityNotFound(start.0.clone()));
+        }
+        let mut visited: HashSet<String> = HashSet::from([start.0.clone()]);
+        let mut queue = VecDeque::from([(start.0.clone(), 0usize)]);
+        let mut result = Vec::new();
+        while let Some((current, depth)) = queue.pop_front() {
+            result.push(EntityId::new(current.clone()));
+            if depth >= max_depth {
+                continue;
+            }
+            for (next, rt) in self.out_edges.get(&current).into_iter().flatten() {
+                let valid = self.edge(&current, next, rt).is_some_and(|r| r.is_valid_at(t));
+                if valid && visited.insert(next.clone()) {
+                    queue.push_back((next.clone(), depth + 1));
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// [`shortest_path`](Self::shortest_path) over relationships valid at time `t`.
+    ///
+    /// # Errors
+    /// [`GraphError::EntityNotFound`] if either endpoint is missing.
+    pub fn shortest_path_at(
+        &self,
+        from: &EntityId,
+        to: &EntityId,
+        t: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<Vec<EntityId>>, GraphError> {
+        for id in [from, to] {
+            if !self.entities.contains_key(id.as_str()) {
+                return Err(GraphError::EntityNotFound(id.0.clone()));
+            }
+        }
+        if from == to {
+            return Ok(Some(vec![from.clone()]));
+        }
+        let mut parent: HashMap<String, String> = HashMap::new();
+        let mut visited: HashSet<String> = HashSet::from([from.0.clone()]);
+        let mut queue = VecDeque::from([from.0.clone()]);
+        while let Some(current) = queue.pop_front() {
+            for (next, rt) in self.out_edges.get(&current).into_iter().flatten() {
+                let valid = self.edge(&current, next, rt).is_some_and(|r| r.is_valid_at(t));
+                if !valid || !visited.insert(next.clone()) {
+                    continue;
+                }
+                parent.insert(next.clone(), current.clone());
+                if next == &to.0 {
+                    let mut path = vec![to.clone()];
+                    let mut node = next.clone();
+                    while let Some(p) = parent.get(&node) {
+                        path.push(EntityId::new(p.clone()));
+                        node = p.clone();
+                    }
+                    path.reverse();
+                    return Ok(Some(path));
+                }
+                queue.push_back(next.clone());
+            }
+        }
+        Ok(None)
+    }
+}
+
+// ── petgraph interop ─────────────────────────────────────────────────────────
+
+/// Node index of every entity, returned by [`GraphStore::to_petgraph`].
+#[cfg(feature = "petgraph")]
+pub type NodeMap = HashMap<EntityId, petgraph::stable_graph::NodeIndex>;
+
+#[cfg(feature = "petgraph")]
+impl GraphStore {
+    /// Copy the graph into a [`petgraph`] `StableDiGraph`, to run any petgraph
+    /// algorithm on it (strongly connected components, topological sort,
+    /// dominators, PageRank, ...). Returns the graph and the node index of
+    /// every entity.
+    pub fn to_petgraph(&self) -> (petgraph::stable_graph::StableDiGraph<Entity, Relationship>, NodeMap) {
+        let mut graph =
+            petgraph::stable_graph::StableDiGraph::with_capacity(self.entities.len(), self.edges.len());
+        let mut nodes = NodeMap::with_capacity(self.entities.len());
+        for entity in self.entities.values() {
+            nodes.insert(entity.id.clone(), graph.add_node(entity.clone()));
+        }
+        for rel in self.edges.values() {
+            if let (Some(&a), Some(&b)) = (nodes.get(&rel.from), nodes.get(&rel.to)) {
+                graph.add_edge(a, b, rel.clone());
+            }
+        }
+        (graph, nodes)
+    }
+
+    /// Build a store from a petgraph graph whose nodes are [`Entity`] and
+    /// edges are [`Relationship`] (each edge's endpoints come from the graph).
+    ///
+    /// # Errors
+    /// Duplicate entity ids or relationships.
+    pub fn from_petgraph(
+        graph: &petgraph::stable_graph::StableDiGraph<Entity, Relationship>,
+    ) -> Result<Self, GraphError> {
+        use petgraph::visit::{EdgeRef, IntoEdgeReferences};
+        let mut store = Self::new();
+        for idx in graph.node_indices() {
+            store.add_entity(graph[idx].clone())?;
+        }
+        for edge in graph.edge_references() {
+            let mut rel = edge.weight().clone();
+            rel.from = graph[edge.source()].id.clone();
+            rel.to = graph[edge.target()].id.clone();
+            store.add_relationship(rel)?;
+        }
+        Ok(store)
+    }
+
+    /// Cheapest directed path where each relationship costs its numeric
+    /// property `weight_prop` (1.0 when the property is missing), using
+    /// petgraph's Dijkstra-style A* search. Returns the total cost and the
+    /// path.
+    ///
+    /// # Errors
+    /// [`GraphError::EntityNotFound`] for a missing endpoint, and
+    /// [`GraphError::InvalidProperty`] when a weight is not a non-negative number.
+    pub fn shortest_path_weighted(
+        &self,
+        from: &EntityId,
+        to: &EntityId,
+        weight_prop: &str,
+    ) -> Result<Option<(f64, Vec<EntityId>)>, GraphError> {
+        for rel in self.edges.values() {
+            if let Some(v) = rel.properties.get(weight_prop) {
+                let w = v.as_number().unwrap_or(f64::NAN);
+                if !(w.is_finite() && w >= 0.0) {
+                    return Err(GraphError::InvalidProperty(format!(
+                        "'{weight_prop}' on {} -[{}]-> {} must be a non-negative number",
+                        rel.from.0, rel.rel_type, rel.to.0
+                    )));
+                }
+            }
+        }
+        let (graph, nodes) = self.to_petgraph();
+        let start = *nodes.get(from).ok_or_else(|| GraphError::EntityNotFound(from.0.clone()))?;
+        let goal = *nodes.get(to).ok_or_else(|| GraphError::EntityNotFound(to.0.clone()))?;
+        let found = petgraph::algo::astar(
+            &graph,
+            start,
+            |n| n == goal,
+            |e| {
+                e.weight().properties.get(weight_prop).and_then(|v| v.as_number().ok()).unwrap_or(1.0)
+            },
+            |_| 0.0,
+        );
+        Ok(found.map(|(total, path)| (total, path.into_iter().map(|n| graph[n].id.clone()).collect())))
+    }
+}

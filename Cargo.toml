@@ -1,9 +1,18 @@
 [package]
 name = "mem-graph"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+rust-version = "1.82"
 license = "MIT"
-description = "Knowledge graph primitives: entities, relationships, typed properties, BFS/DFS traversal"
+description = "In-memory knowledge graph for agents: typed entities and relationships, time-bounded facts with point-in-time queries, traversal, JSON snapshots, petgraph interop"
+repository = "https://gitlab.com/mattbusel/mem-graph"
+readme = "README.md"
+keywords = ["knowledge-graph", "graph", "agents", "memory", "temporal"]
+categories = ["data-structures", "algorithms"]
+
+[features]
+# Convert to/from petgraph and run its algorithms (weighted shortest paths and more).
+petgraph = ["dep:petgraph"]
 
 [dependencies]
 thiserror = "1"
@@ -11,11 +20,16 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+petgraph = { version = "0.8", default-features = false, features = ["stable_graph"], optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5" }
+petgraph = "0.8"
 proptest = "1"
 
 [[bench]]
 name = "graph_bench"
 harness = false
+
+[package.metadata.docs.rs]
+all-features = true
