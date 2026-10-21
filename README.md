@@ -1,5 +1,13 @@
 # mem-graph
 
+<!-- outcome-block -->
+**Give your agent facts it can reason over ("Alice works at Acme, Acme is in Berlin") without running a graph database: paths, time-bounded facts and JSON snapshots in one embeddable struct.**
+
+**Why this over the alternatives:** A vector store can't follow relationships and a graph database is a server to run. This is a plain struct with only serde, uuid, chrono and thiserror.
+
+**Guarantee:** if it doesn't do what this README says, [open an issue](https://github.com/Mattbusel/mem-graph/issues) and I'll fix it.
+<!-- outcome-block -->
+
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
