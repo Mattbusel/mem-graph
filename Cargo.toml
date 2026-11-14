@@ -1,5 +1,5 @@
 [package]
-name = "mem-graph"
+name = "mattbusel-mem-graph"
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.82"
@@ -9,6 +9,11 @@ repository = "https://gitlab.com/mattbusel/mem-graph"
 readme = "README.md"
 keywords = ["knowledge-graph", "graph", "agents", "memory", "temporal"]
 categories = ["data-structures", "algorithms"]
+
+[lib]
+# Published as mattbusel-mem-graph (the crates.io name mem-graph belongs to an
+# unrelated crate). The library keeps the name mem_graph: `use mem_graph::...`.
+name = "mem_graph"
 
 [features]
 # Convert to/from petgraph and run its algorithms (weighted shortest paths and more).

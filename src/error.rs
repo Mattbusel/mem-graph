@@ -2,7 +2,11 @@
 use thiserror::Error;
 
 /// All errors that can occur in the mem-graph crate.
+///
+/// The enum is `#[non_exhaustive]`: new variants may be added in minor
+/// releases, so a `match` on it needs a wildcard arm.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum GraphError {
     /// Entity with the given id was not found in the store.
     #[error("Entity '{0}' not found")]
@@ -10,7 +14,14 @@ pub enum GraphError {
 
     /// A relationship between two entities with the given type was not found.
     #[error("Relationship '{rel}' from '{from}' to '{to}' not found")]
-    RelationshipNotFound { from: String, to: String, rel: String },
+    RelationshipNotFound {
+        /// Source entity id.
+        from: String,
+        /// Target entity id.
+        to: String,
+        /// Relationship type.
+        rel: String,
+    },
 
     /// An entity with this id already exists.
     #[error("Duplicate entity id: '{0}'")]
@@ -18,15 +29,23 @@ pub enum GraphError {
 
     /// A relationship with this exact triple already exists.
     #[error("Duplicate relationship: '{rel}' from '{from}' to '{to}' already exists")]
-    DuplicateRelationship { from: String, to: String, rel: String },
+    DuplicateRelationship {
+        /// Source entity id.
+        from: String,
+        /// Target entity id.
+        to: String,
+        /// Relationship type.
+        rel: String,
+    },
 
     /// A property was accessed with the wrong type.
     #[error("Property type mismatch: expected {expected}, found {found}")]
-    TypeMismatch { expected: String, found: String },
-
-    /// A cycle was detected during traversal.
-    #[error("Cycle detected in graph traversal starting from '{0}'")]
-    CycleDetected(String),
+    TypeMismatch {
+        /// The variant the caller asked for.
+        expected: String,
+        /// The variant actually stored.
+        found: String,
+    },
 
     /// JSON serialization or deserialization failed.
     #[error("Serialization error: {0}")]

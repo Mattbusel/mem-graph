@@ -19,6 +19,10 @@ use crate::error::GraphError;
 use crate::types::{Entity, EntityId, Relationship};
 
 /// The central in-memory graph store.
+///
+/// `GraphStore` is `Clone` (a deep copy), `Debug` and `Default` (empty), so it
+/// can live inside an agent's own state struct that derives those traits.
+#[derive(Debug, Clone, Default)]
 pub struct GraphStore {
     entities: HashMap<String, Entity>,
     /// Forward index: from_id → Vec<(to_id, rel_type)>
@@ -185,39 +189,75 @@ impl GraphStore {
         Ok(result)
     }
 
-    /// DFS traversal from a start node, up to `max_depth` hops.
+    /// Depth-first traversal from a start node, up to `max_depth` hops.
     ///
-    /// Returns visited entity ids in DFS order.
+    /// Returns every entity reachable from `start` within `max_depth` hops,
+    /// each exactly once, in depth-first preorder (outgoing relationships are
+    /// followed in insertion order). The returned set always equals the set
+    /// [`bfs`](Self::bfs) returns for the same arguments; only the order differs.
     ///
-    /// # Returns
-    /// - `Err(GraphError::EntityNotFound)` if `start` is not in the store.
+    /// The traversal is iterative, so it does not overflow the stack on deep
+    /// graphs (a 200 000-node chain is part of the test suite). A node first
+    /// reached by a long path is expanded again when a shorter path reaches it
+    /// later, so nothing within `max_depth` hops is missed.
+    ///
+    /// # Example
+    /// ```rust
+    /// use mem_graph::{Entity, EntityId, GraphStore, Relationship};
+    ///
+    /// let mut g = GraphStore::new();
+    /// for id in ["a", "b", "x", "y"] {
+    ///     g.add_entity(Entity::new(EntityId::new(id), "Node")).unwrap();
+    /// }
+    /// for (from, to) in [("a", "b"), ("a", "x"), ("b", "x"), ("x", "y")] {
+    ///     g.add_relationship(Relationship::new(EntityId::new(from), EntityId::new(to), "r")).unwrap();
+    /// }
+    /// // y is two hops away through a -> x -> y, even though DFS reaches x
+    /// // through the longer path a -> b -> x first.
+    /// let ids: Vec<_> = g.dfs(&EntityId::new("a"), 2).unwrap()
+    ///     .into_iter().map(|id| id.0).collect();
+    /// assert_eq!(ids, ["a", "b", "x", "y"]);
+    /// ```
+    ///
+    /// # Errors
+    /// [`GraphError::EntityNotFound`] if `start` is not in the store.
     pub fn dfs(&self, start: &EntityId, max_depth: usize) -> Result<Vec<EntityId>, GraphError> {
         if !self.entities.contains_key(start.as_str()) {
             return Err(GraphError::EntityNotFound(start.0.clone()));
         }
-        let mut visited = HashSet::new();
+        // Smallest depth each node has been expanded at so far.
+        let mut best_depth: HashMap<&str, usize> = HashMap::new();
         let mut result = Vec::new();
-        self.dfs_inner(start.as_str(), 0, max_depth, &mut visited, &mut result);
-        Ok(result)
-    }
+        let mut stack: Vec<(&str, usize)> = vec![(start.as_str(), 0)];
 
-    fn dfs_inner(
-        &self,
-        current: &str,
-        depth: usize,
-        max_depth: usize,
-        visited: &mut HashSet<String>,
-        result: &mut Vec<EntityId>,
-    ) {
-        if visited.contains(current) { return; }
-        visited.insert(current.to_string());
-        result.push(EntityId::new(current));
-        if depth >= max_depth { return; }
-        if let Some(edges) = self.out_edges.get(current) {
-            for (neighbor, _) in edges {
-                self.dfs_inner(neighbor, depth + 1, max_depth, visited, result);
+        while let Some((node, depth)) = stack.pop() {
+            match best_depth.get(node) {
+                // Already expanded at this depth or closer: nothing new below it.
+                Some(&seen) if seen <= depth => continue,
+                // Reached again by a shorter path: expand again, but it is
+                // already in `result`.
+                Some(_) => {}
+                None => result.push(EntityId::new(node)),
+            }
+            best_depth.insert(node, depth);
+            if depth >= max_depth {
+                continue;
+            }
+            // `depth < max_depth`, so `depth + 1` cannot overflow.
+            let next_depth = depth + 1;
+            if let Some(edges) = self.out_edges.get(node) {
+                // Reverse so the first relationship is popped (visited) first,
+                // which keeps the preorder of a recursive DFS.
+                for (neighbor, _) in edges.iter().rev() {
+                    let worth_visiting =
+                        best_depth.get(neighbor.as_str()).is_none_or(|&seen| seen > next_depth);
+                    if worth_visiting {
+                        stack.push((neighbor.as_str(), next_depth));
+                    }
+                }
             }
         }
+        Ok(result)
     }
 
     /// Find the shortest directed path from `from` to `to` using BFS.
@@ -274,12 +314,14 @@ impl GraphStore {
 
     /// Compute the transitive closure: all entity ids reachable from `start`.
     ///
+    /// `EntityId` implements `Borrow<str>`, so the set can be queried with a
+    /// plain string: `closure.contains("alice")`.
+    ///
     /// # Returns
-    /// - `Ok(HashSet<String>)` of reachable entity ids (including `start`).
+    /// - `Ok(HashSet<EntityId>)` of reachable entity ids (including `start`).
     /// - `Err(GraphError::EntityNotFound)` if `start` is not in the store.
-    pub fn transitive_closure(&self, start: &EntityId) -> Result<HashSet<String>, GraphError> {
-        let visited = self.bfs(start, usize::MAX)?;
-        Ok(visited.into_iter().map(|id| id.0).collect())
+    pub fn transitive_closure(&self, start: &EntityId) -> Result<HashSet<EntityId>, GraphError> {
+        Ok(self.bfs(start, usize::MAX)?.into_iter().collect())
     }
 
     /// Return the number of entities in the store.
@@ -288,11 +330,6 @@ impl GraphStore {
     /// Return the number of edges in the store.
     pub fn edge_count(&self) -> usize { self.edges.len() }
 }
-
-impl Default for GraphStore {
-    fn default() -> Self { Self::new() }
-}
-
 
 // ── Updates, snapshots and point-in-time queries ─────────────────────────────
 
@@ -364,11 +401,32 @@ impl GraphStore {
 
     /// Copy the whole graph into a [`GraphSnapshot`](crate::serial::GraphSnapshot)
     /// (for `to_json` and `restore_into`).
+    ///
+    /// The output is deterministic: entities are sorted by id and
+    /// relationships by `(from, to, rel_type)`, and property maps serialize
+    /// with sorted keys, so two snapshots of the same graph produce identical
+    /// JSON. That makes snapshots usable for diffs and golden-file tests.
     pub fn snapshot(&self) -> crate::serial::GraphSnapshot {
+        let mut entities: Vec<&Entity> = self.entities.values().collect();
+        entities.sort_unstable_by(|a, b| a.id.0.cmp(&b.id.0));
+        let mut keys: Vec<&(String, String, String)> = self.edges.keys().collect();
+        keys.sort_unstable();
         crate::serial::GraphSnapshot {
-            entities: self.entities.values().cloned().collect(),
-            relationships: self.edges.values().cloned().collect(),
+            entities: entities.into_iter().cloned().collect(),
+            relationships: keys.into_iter().map(|k| self.edges[k].clone()).collect(),
         }
+    }
+
+    /// Build a new store from a snapshot.
+    ///
+    /// # Errors
+    /// The same as [`GraphSnapshot::restore_into`](crate::serial::GraphSnapshot::restore_into):
+    /// duplicate ids or relationships, or a relationship whose endpoint is not
+    /// in the snapshot.
+    pub fn from_snapshot(snapshot: &crate::serial::GraphSnapshot) -> Result<Self, GraphError> {
+        let mut store = Self::new();
+        snapshot.restore_into(&mut store)?;
+        Ok(store)
     }
 
     fn edge(&self, from: &str, to: &str, rel_type: &str) -> Option<&Relationship> {

@@ -111,3 +111,27 @@ fn test_multi_edge_types_between_same_nodes() {
     assert_eq!(g.edge_count(), 2);
     assert_eq!(g.neighbors_out(&EntityId::new("a")).len(), 2);
 }
+
+/// Regression test for issue #1: a node first reached by a long path at the
+/// depth limit was never expanded, so nodes reachable through a shorter path
+/// to it were missed. Before the fix `dfs(a, 2)` returned [a, b, x].
+#[test]
+fn test_dfs_expands_node_reached_later_by_shorter_path_issue_1() {
+    let mut g = GraphStore::new();
+    for id in ["a", "b", "x", "y"] {
+        g.add_entity(Entity::new(EntityId::new(id), "N")).unwrap();
+    }
+    for (from, to) in [("a", "b"), ("a", "x"), ("b", "x"), ("x", "y")] {
+        g.add_relationship(Relationship::new(EntityId::new(from), EntityId::new(to), "r")).unwrap();
+    }
+
+    let dfs = g.dfs(&EntityId::new("a"), 2).unwrap();
+    let ids: Vec<&str> = dfs.iter().map(EntityId::as_str).collect();
+    assert_eq!(ids, ["a", "b", "x", "y"], "y is two hops away via a -> x -> y");
+
+    let mut bfs: Vec<String> = g.bfs(&EntityId::new("a"), 2).unwrap().into_iter().map(|id| id.0).collect();
+    let mut dfs: Vec<String> = dfs.into_iter().map(|id| id.0).collect();
+    bfs.sort();
+    dfs.sort();
+    assert_eq!(dfs, bfs);
+}

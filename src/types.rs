@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
+use std::collections::{BTreeMap, HashMap};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use crate::error::GraphError;
@@ -21,6 +22,22 @@ impl EntityId {
 
 impl std::fmt::Display for EntityId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) }
+}
+
+/// Lets a `HashSet<EntityId>` or `HashMap<EntityId, _>` be queried with a
+/// plain `&str`, e.g. `closure.contains("alice")`. Hashing and equality match
+/// the inner `String`, as `Borrow` requires.
+impl std::borrow::Borrow<str> for EntityId {
+    fn borrow(&self) -> &str { &self.0 }
+}
+
+/// Serialize a property map with its keys sorted, so JSON output is
+/// deterministic (a `HashMap` iterates in random order).
+fn serialize_sorted<S: Serializer>(
+    map: &HashMap<String, PropValue>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    map.iter().collect::<BTreeMap<_, _>>().serialize(serializer)
 }
 
 /// Typed property value for entities and edges.
@@ -91,7 +108,8 @@ pub struct Entity {
     pub id: EntityId,
     /// Semantic type label (e.g. "Person", "Document").
     pub kind: String,
-    /// Typed key-value properties.
+    /// Typed key-value properties (serialized with sorted keys).
+    #[serde(serialize_with = "serialize_sorted")]
     pub properties: std::collections::HashMap<String, PropValue>,
     /// Wall-clock creation time.
     pub created_at: DateTime<Utc>,
@@ -129,7 +147,8 @@ pub struct Relationship {
     pub to: EntityId,
     /// Semantic relationship type (e.g. "knows", "owns").
     pub rel_type: String,
-    /// Typed key-value properties on the edge.
+    /// Typed key-value properties on the edge (serialized with sorted keys).
+    #[serde(serialize_with = "serialize_sorted")]
     pub properties: std::collections::HashMap<String, PropValue>,
     /// Optional validity window start.
     pub valid_from: Option<DateTime<Utc>>,
