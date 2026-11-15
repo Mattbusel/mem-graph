@@ -54,4 +54,15 @@ pub enum GraphError {
     /// A property value was invalid.
     #[error("Invalid property value: {0}")]
     InvalidProperty(String),
+
+    /// Reading or writing a file (or another reader/writer) failed, e.g. in
+    /// [`GraphStore::save_json`](crate::GraphStore::save_json).
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// Binary encoding or decoding failed: the bytes are not a mem-graph
+    /// binary snapshot, were written by an incompatible format version, or
+    /// are truncated or corrupt. Only produced with the `binary` feature.
+    #[error("Binary encoding error: {0}")]
+    Binary(String),
 }

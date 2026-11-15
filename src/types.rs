@@ -102,7 +102,7 @@ impl PropValue {
 }
 
 /// An entity node in the graph.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Entity {
     /// Unique identifier for this entity.
     pub id: EntityId,
@@ -139,7 +139,7 @@ impl Entity {
 }
 
 /// A directed, typed relationship (edge) between two entities.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Relationship {
     /// Source entity.
     pub from: EntityId,

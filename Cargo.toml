@@ -1,10 +1,10 @@
 [package]
 name = "mattbusel-mem-graph"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.82"
 license = "MIT"
-description = "In-memory knowledge graph for agents: typed entities and relationships, time-bounded facts with point-in-time queries, traversal, JSON snapshots, petgraph interop"
+description = "In-memory knowledge graph for agents: typed entities and relationships, time-bounded facts with point-in-time queries, traversal, text search, subgraphs, JSON and binary save/load, petgraph interop"
 repository = "https://gitlab.com/mattbusel/mem-graph"
 readme = "README.md"
 keywords = ["knowledge-graph", "graph", "agents", "memory", "temporal"]
@@ -18,6 +18,12 @@ name = "mem_graph"
 [features]
 # Convert to/from petgraph and run its algorithms (weighted shortest paths and more).
 petgraph = ["dep:petgraph"]
+# Compact binary save/load (postcard) next to the always-available JSON.
+binary = ["dep:postcard"]
+# serde support is always compiled in (the graph, entities and relationships
+# implement Serialize/Deserialize without any feature). This feature does
+# nothing; it exists so `features = ["serde"]` resolves for people who expect it.
+serde = []
 
 [dependencies]
 thiserror = "1"
@@ -26,6 +32,7 @@ serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 petgraph = { version = "0.8", default-features = false, features = ["stable_graph"], optional = true }
+postcard = { version = "1", default-features = false, features = ["use-std"], optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5" }

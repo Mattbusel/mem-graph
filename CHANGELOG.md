@@ -1,6 +1,79 @@
 # Changelog
 
-## [0.2.0] - Unreleased
+## [0.3.0] - Unreleased
+
+Everything is additive; code written against 0.2 compiles unchanged.
+
+```toml
+[dependencies]
+mattbusel-mem-graph = { version = "0.3", features = ["binary", "petgraph"] }
+```
+
+### Added
+
+- **Query helpers** (new `query` module, all methods on `GraphStore`):
+  - Neighbors by relationship type: `neighbors_out_by_type`,
+    `neighbors_in_by_type`, and `neighbors_by_type` with a `Direction`
+    (`Outgoing`, `Incoming` or `Both`; re-exported as `mem_graph::Direction`).
+  - `relationships_of(id, direction)`, `relationships_of_type(rel_type)` and
+    `entities_of_kind(kind)`.
+  - Filtered shortest paths: `shortest_path_via(from, to, &["reports_to"])`
+    follows only the listed relationship types, and
+    `shortest_path_where(from, to, direction, predicate)` follows any
+    relationships a closure accepts, in either direction (so undirected
+    paths are possible).
+  - Subgraph extraction: `within(start, depth, direction)` lists the ids in
+    range, `subgraph(start, depth, direction)` returns them as a new
+    independent `GraphStore` with every relationship between them (the
+    induced subgraph), and `induced_subgraph(ids)` does the same for any list
+    of ids.
+  - Text search: `search_entities(query)` is a case-insensitive substring
+    match (Unicode-aware) over ids, kinds and text properties, including text
+    inside list properties; `search_entities_by_prop(key, query)` restricts it
+    to one property; `find_by_prop(key, value)` is an exact match. Results are
+    sorted by id.
+- **serde and save/load.** `GraphStore` now implements `Serialize` and
+  `Deserialize` (as its snapshot; deserializing validates the graph and
+  rejects duplicate ids or dangling relationships with a serde error), so it
+  can be a field in your own serde types. `Entity`, `Relationship` and
+  `GraphSnapshot` already did. New JSON helpers: `GraphStore::to_json`,
+  `to_json_pretty`, `from_json`, `write_json` / `read_json` (any `std::io`
+  writer or reader), and `save_json` / `load_json` for files.
+  `GraphSnapshot` gains `to_json_pretty`, `write_json` and `read_json`.
+- **Compact binary format** (new `binary` feature, uses postcard):
+  `to_bytes` / `from_bytes` on `GraphStore` and `GraphSnapshot`, and
+  `save_binary` / `load_binary`. The bytes start with a `MGRAPH` header and a
+  format version byte, so foreign, truncated, padded or future-version data
+  is rejected with `GraphError::Binary` instead of being misread. postcard was
+  picked over bincode because bincode is no longer maintained.
+- File saves (`save_json`, `save_binary`) are atomic: they write a temporary
+  file next to the target and rename it over the target, so a crash mid-save
+  keeps the previous file.
+- **petgraph** feature: `to_petgraph_graph` / `from_petgraph_graph` convert to
+  and from a plain `petgraph::Graph` (`DiGraph<Entity, Relationship>`), next
+  to the existing `StableDiGraph` ones. `from_petgraph_with(graph, node_fn,
+  edge_fn)` imports any directed `petgraph::Graph`, whatever its node and
+  edge weights, through two closures. New `GraphNodeMap` type alias.
+- `GraphError::Io` (file and reader/writer failures) and `GraphError::Binary`.
+  `GraphError` is `#[non_exhaustive]`, so this is not breaking.
+- `Entity`, `Relationship` and `GraphSnapshot` derive `PartialEq`.
+- `GraphSnapshot` is re-exported at the crate root.
+- A `serde` feature that does nothing: serde support is always compiled in,
+  and the feature exists only so `features = ["serde"]` resolves.
+- `examples/agent_memory.rs`: long-term memory for an LLM agent. It stores
+  facts as triples, ends a fact when a newer one replaces it (so past states
+  stay queryable), recalls prompt-ready sentences with text search plus a
+  one-hop subgraph, and persists across sessions with `save_json` /
+  `load_json`. Its docs show how to expose `remember` and `recall` as rig
+  tools. Run it with `cargo run --example agent_memory`.
+
+### Changed
+
+- `to_petgraph` now adds nodes in entity id order and edges in
+  `(from, to, rel_type)` order, so the same graph always gets the same
+  petgraph indices (it used `HashMap` order before).
+
+## [0.2.0] - 2026-11-15
 
 First release of the 0.2 line on crates.io. It is published as
 `mattbusel-mem-graph` (the crates.io name `mem-graph` belongs to an unrelated

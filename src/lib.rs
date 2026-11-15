@@ -3,7 +3,8 @@
 //!
 //! An embeddable, in-memory knowledge graph for agents: typed entities and
 //! relationships with property maps, BFS/DFS traversal, shortest path,
-//! transitive closure, time-bounded facts, and JSON snapshots.
+//! transitive closure, time-bounded facts, text search, subgraph extraction,
+//! and JSON or binary save/load.
 //!
 //! Published on crates.io as `mattbusel-mem-graph`; the library name is
 //! `mem_graph`, so code imports it as `use mem_graph::...`.
@@ -25,16 +26,46 @@
 //!   [`bfs_at`](GraphStore::bfs_at) and
 //!   [`shortest_path_at`](GraphStore::shortest_path_at). The plain queries see
 //!   every relationship regardless of its window.
+//! - **Query helpers** ([`query`]): neighbors by relationship type
+//!   ([`neighbors_out_by_type`](GraphStore::neighbors_out_by_type),
+//!   [`neighbors_in_by_type`](GraphStore::neighbors_in_by_type),
+//!   [`neighbors_by_type`](GraphStore::neighbors_by_type)), shortest paths
+//!   restricted to some relationship types or a predicate, in either
+//!   [`Direction`] ([`shortest_path_via`](GraphStore::shortest_path_via),
+//!   [`shortest_path_where`](GraphStore::shortest_path_where)), neighborhood
+//!   extraction as a new store ([`subgraph`](GraphStore::subgraph),
+//!   [`induced_subgraph`](GraphStore::induced_subgraph)), and
+//!   case-insensitive text search over ids, kinds and text properties
+//!   ([`search_entities`](GraphStore::search_entities),
+//!   [`search_entities_by_prop`](GraphStore::search_entities_by_prop),
+//!   [`find_by_prop`](GraphStore::find_by_prop)).
 //! - **Snapshots.** [`GraphStore::snapshot`] returns a
 //!   [`serial::GraphSnapshot`] with a deterministic order (entities by id,
 //!   relationships by `(from, to, rel_type)`, property keys sorted), which
 //!   serializes to JSON and restores atomically with
 //!   [`restore_into`](serial::GraphSnapshot::restore_into) or
 //!   [`GraphStore::from_snapshot`].
-//! - **petgraph interop** (the `petgraph` cargo feature): `to_petgraph`,
-//!   `from_petgraph` and `shortest_path_weighted` (cheapest path by a numeric
-//!   relationship property), so any petgraph algorithm (strongly connected
-//!   components, topological sort, PageRank, ...) can run on the graph.
+//! - **serde and save/load** ([`serial`]): the graph, entities and
+//!   relationships implement `Serialize`/`Deserialize` (no feature needed).
+//!   [`GraphStore::save_json`] / [`GraphStore::load_json`] write and read
+//!   files atomically; with the `binary` cargo feature, `save_binary` /
+//!   `load_binary` and `to_bytes` / `from_bytes` use a compact postcard
+//!   encoding.
+//! - **petgraph interop** (the `petgraph` cargo feature): `to_petgraph` /
+//!   `from_petgraph` (`StableDiGraph`), `to_petgraph_graph` /
+//!   `from_petgraph_graph` (plain `petgraph::Graph`), `from_petgraph_with`
+//!   (import any directed petgraph graph through two closures), and
+//!   `shortest_path_weighted` (cheapest path by a numeric relationship
+//!   property), so any petgraph algorithm (strongly connected components,
+//!   topological sort, PageRank, ...) can run on the graph.
+//!
+//! ## Cargo features
+//!
+//! | Feature    | Adds |
+//! |------------|------|
+//! | `petgraph` | petgraph conversions and `shortest_path_weighted` |
+//! | `binary`   | compact binary save/load (postcard) |
+//! | `serde`    | nothing: serde support is always on; the feature only exists so `features = ["serde"]` resolves |
 //!
 //! The crate contains no `unsafe` code (`#![forbid(unsafe_code)]`).
 //!
@@ -81,11 +112,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod error;
+pub mod query;
 pub mod serial;
 pub mod store;
 pub mod types;
 
 pub use error::GraphError;
+pub use query::Direction;
+pub use serial::GraphSnapshot;
 pub use store::GraphStore;
 pub use types::{Entity, EntityId, PropValue, Relationship};
 

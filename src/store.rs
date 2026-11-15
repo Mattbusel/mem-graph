@@ -11,7 +11,7 @@
 //! - Non-panicking: all public methods return `Result`.
 //!
 //! ## NOT Responsible For
-//! - Persistence (in-memory only)
+//! - Persistence beyond whole-graph save/load (see [`crate::serial`])
 //! - Distributed replication
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -24,13 +24,13 @@ use crate::types::{Entity, EntityId, Relationship};
 /// can live inside an agent's own state struct that derives those traits.
 #[derive(Debug, Clone, Default)]
 pub struct GraphStore {
-    entities: HashMap<String, Entity>,
+    pub(crate) entities: HashMap<String, Entity>,
     /// Forward index: from_id → Vec<(to_id, rel_type)>
-    out_edges: HashMap<String, Vec<(String, String)>>,
+    pub(crate) out_edges: HashMap<String, Vec<(String, String)>>,
     /// Backward index: to_id → Vec<(from_id, rel_type)>
-    in_edges: HashMap<String, Vec<(String, String)>>,
+    pub(crate) in_edges: HashMap<String, Vec<(String, String)>>,
     /// Edge storage: (from, to, rel_type) → Relationship
-    edges: HashMap<(String, String, String), Relationship>,
+    pub(crate) edges: HashMap<(String, String, String), Relationship>,
 }
 
 impl GraphStore {
@@ -407,14 +407,24 @@ impl GraphStore {
     /// with sorted keys, so two snapshots of the same graph produce identical
     /// JSON. That makes snapshots usable for diffs and golden-file tests.
     pub fn snapshot(&self) -> crate::serial::GraphSnapshot {
+        crate::serial::GraphSnapshot {
+            entities: self.sorted_entities().into_iter().cloned().collect(),
+            relationships: self.sorted_relationships().into_iter().cloned().collect(),
+        }
+    }
+
+    /// Every entity, sorted by id.
+    pub(crate) fn sorted_entities(&self) -> Vec<&Entity> {
         let mut entities: Vec<&Entity> = self.entities.values().collect();
         entities.sort_unstable_by(|a, b| a.id.0.cmp(&b.id.0));
-        let mut keys: Vec<&(String, String, String)> = self.edges.keys().collect();
-        keys.sort_unstable();
-        crate::serial::GraphSnapshot {
-            entities: entities.into_iter().cloned().collect(),
-            relationships: keys.into_iter().map(|k| self.edges[k].clone()).collect(),
-        }
+        entities
+    }
+
+    /// Every relationship, sorted by `(from, to, rel_type)`.
+    pub(crate) fn sorted_relationships(&self) -> Vec<&Relationship> {
+        let mut edges: Vec<(&(String, String, String), &Relationship)> = self.edges.iter().collect();
+        edges.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        edges.into_iter().map(|(_, rel)| rel).collect()
     }
 
     /// Build a new store from a snapshot.
@@ -429,7 +439,7 @@ impl GraphStore {
         Ok(store)
     }
 
-    fn edge(&self, from: &str, to: &str, rel_type: &str) -> Option<&Relationship> {
+    pub(crate) fn edge(&self, from: &str, to: &str, rel_type: &str) -> Option<&Relationship> {
         self.edges.get(&(from.to_string(), to.to_string(), rel_type.to_string()))
     }
 
@@ -535,25 +545,152 @@ impl GraphStore {
 #[cfg(feature = "petgraph")]
 pub type NodeMap = HashMap<EntityId, petgraph::stable_graph::NodeIndex>;
 
+/// Node index of every entity, returned by [`GraphStore::to_petgraph_graph`].
+#[cfg(feature = "petgraph")]
+pub type GraphNodeMap = HashMap<EntityId, petgraph::graph::NodeIndex>;
+
 #[cfg(feature = "petgraph")]
 impl GraphStore {
     /// Copy the graph into a [`petgraph`] `StableDiGraph`, to run any petgraph
     /// algorithm on it (strongly connected components, topological sort,
     /// dominators, PageRank, ...). Returns the graph and the node index of
     /// every entity.
+    ///
+    /// The output is deterministic: nodes are added in entity id order and
+    /// edges in `(from, to, rel_type)` order, so the same graph always gets
+    /// the same node and edge indices.
     pub fn to_petgraph(&self) -> (petgraph::stable_graph::StableDiGraph<Entity, Relationship>, NodeMap) {
         let mut graph =
             petgraph::stable_graph::StableDiGraph::with_capacity(self.entities.len(), self.edges.len());
         let mut nodes = NodeMap::with_capacity(self.entities.len());
-        for entity in self.entities.values() {
+        for entity in self.sorted_entities() {
             nodes.insert(entity.id.clone(), graph.add_node(entity.clone()));
         }
-        for rel in self.edges.values() {
+        for rel in self.sorted_relationships() {
             if let (Some(&a), Some(&b)) = (nodes.get(&rel.from), nodes.get(&rel.to)) {
                 graph.add_edge(a, b, rel.clone());
             }
         }
         (graph, nodes)
+    }
+
+    /// Copy the graph into a plain [`petgraph::graph::DiGraph`] (the
+    /// `petgraph::Graph` type most petgraph algorithms and examples use).
+    /// Returns the graph and the node index of every entity.
+    ///
+    /// Like [`to_petgraph`](Self::to_petgraph), the order is deterministic:
+    /// node `i` is the `i`-th entity by id, and edges are added in
+    /// `(from, to, rel_type)` order.
+    ///
+    /// # Example
+    /// ```rust
+    /// use mem_graph::{Entity, EntityId, GraphStore, Relationship};
+    ///
+    /// let mut g = GraphStore::new();
+    /// for id in ["a", "b", "c"] {
+    ///     g.add_entity(Entity::new(EntityId::new(id), "Node")).unwrap();
+    /// }
+    /// g.add_relationship(Relationship::new(EntityId::new("a"), EntityId::new("b"), "r")).unwrap();
+    /// g.add_relationship(Relationship::new(EntityId::new("b"), EntityId::new("c"), "r")).unwrap();
+    ///
+    /// let (pg, nodes) = g.to_petgraph_graph();
+    /// let order = petgraph::algo::toposort(&pg, None).unwrap();
+    /// let ids: Vec<&str> = order.iter().map(|&n| pg[n].id.as_str()).collect();
+    /// assert_eq!(ids, ["a", "b", "c"]);
+    /// assert_eq!(pg[nodes[&EntityId::new("c")]].id.as_str(), "c");
+    /// ```
+    pub fn to_petgraph_graph(&self) -> (petgraph::graph::DiGraph<Entity, Relationship>, GraphNodeMap) {
+        let mut graph = petgraph::graph::DiGraph::with_capacity(self.entities.len(), self.edges.len());
+        let mut nodes = GraphNodeMap::with_capacity(self.entities.len());
+        for entity in self.sorted_entities() {
+            nodes.insert(entity.id.clone(), graph.add_node(entity.clone()));
+        }
+        for rel in self.sorted_relationships() {
+            if let (Some(&a), Some(&b)) = (nodes.get(&rel.from), nodes.get(&rel.to)) {
+                graph.add_edge(a, b, rel.clone());
+            }
+        }
+        (graph, nodes)
+    }
+
+    /// Build a store from a plain [`petgraph::graph::DiGraph`] whose nodes are
+    /// [`Entity`] and edges are [`Relationship`]. Each edge's endpoints come
+    /// from the graph, not from the `from`/`to` fields stored in its weight.
+    ///
+    /// # Errors
+    /// [`GraphError::DuplicateEntity`] when two nodes share an id, and
+    /// [`GraphError::DuplicateRelationship`] when two edges between the same
+    /// nodes share a `rel_type`.
+    pub fn from_petgraph_graph(
+        graph: &petgraph::graph::DiGraph<Entity, Relationship>,
+    ) -> Result<Self, GraphError> {
+        Self::from_petgraph_with(graph, |_, entity| entity.clone(), |rel, from, to| Relationship {
+            from,
+            to,
+            ..rel.clone()
+        })
+    }
+
+    /// Build a store from any directed [`petgraph::Graph`], whatever its node
+    /// and edge weights are. `node` turns each node (with its index) into an
+    /// [`Entity`]; `edge` turns each edge weight into a [`Relationship`], and
+    /// receives the ids of the entities its endpoints became so it can use
+    /// them as `from` and `to`. The store always uses those endpoint ids,
+    /// whatever `from`/`to` the returned relationship carries.
+    ///
+    /// Use it to load an existing petgraph graph into the store, e.g. a
+    /// `DiGraph<&str, &str>` of names and relation labels.
+    ///
+    /// # Example
+    /// ```rust
+    /// use mem_graph::{Entity, EntityId, GraphStore, Relationship};
+    /// use petgraph::graph::DiGraph;
+    ///
+    /// let mut pg: DiGraph<&str, &str> = DiGraph::new();
+    /// let alice = pg.add_node("alice");
+    /// let acme = pg.add_node("acme");
+    /// pg.add_edge(alice, acme, "works_at");
+    ///
+    /// let g = GraphStore::from_petgraph_with(
+    ///     &pg,
+    ///     |_, name| Entity::new(EntityId::new(*name), "Thing"),
+    ///     |label, from, to| Relationship::new(from, to, *label),
+    /// )
+    /// .unwrap();
+    /// let works_at = g.neighbors_out_by_type(&EntityId::new("alice"), "works_at");
+    /// assert_eq!(works_at[0].id.as_str(), "acme");
+    /// ```
+    ///
+    /// # Errors
+    /// [`GraphError::DuplicateEntity`] when `node` returns the same id twice,
+    /// and [`GraphError::DuplicateRelationship`] when two edges end up with the
+    /// same `(from, to, rel_type)`.
+    pub fn from_petgraph_with<N, E, Ix, NF, EF>(
+        graph: &petgraph::Graph<N, E, petgraph::Directed, Ix>,
+        mut node: NF,
+        mut edge: EF,
+    ) -> Result<Self, GraphError>
+    where
+        Ix: petgraph::graph::IndexType,
+        NF: FnMut(petgraph::graph::NodeIndex<Ix>, &N) -> Entity,
+        EF: FnMut(&E, EntityId, EntityId) -> Relationship,
+    {
+        let mut store = Self::new();
+        let mut ids: Vec<EntityId> = Vec::with_capacity(graph.node_count());
+        for idx in graph.node_indices() {
+            let entity = node(idx, &graph[idx]);
+            ids.push(entity.id.clone());
+            store.add_entity(entity)?;
+        }
+        for e in graph.raw_edges() {
+            let from = ids[e.source().index()].clone();
+            let to = ids[e.target().index()].clone();
+            let mut rel = edge(&e.weight, from.clone(), to.clone());
+            rel.from = from;
+            rel.to = to;
+            store.add_relationship(rel)?;
+        }
+        Ok(store)
     }
 
     /// Build a store from a petgraph graph whose nodes are [`Entity`] and
