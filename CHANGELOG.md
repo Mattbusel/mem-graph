@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.3.1] - 2026-11-16
+
+- Package metadata only: `repository` points at https://github.com/Mattbusel/mem-graph (the GitHub repository, where issues, releases and the dependents graph are), documentation link (docs.rs), no code change from 0.3.0.
+
 ## [0.3.0] - Unreleased
 
 Everything is additive; code written against 0.2 compiles unchanged.

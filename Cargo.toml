@@ -1,11 +1,12 @@
 [package]
 name = "mattbusel-mem-graph"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 rust-version = "1.82"
 license = "MIT"
 description = "In-memory knowledge graph for agents: typed entities and relationships, time-bounded facts with point-in-time queries, traversal, text search, subgraphs, JSON and binary save/load, petgraph interop"
-repository = "https://gitlab.com/mattbusel/mem-graph"
+repository = "https://github.com/Mattbusel/mem-graph"
+documentation = "https://docs.rs/mattbusel-mem-graph"
 readme = "README.md"
 keywords = ["knowledge-graph", "graph", "agents", "memory", "temporal"]
 categories = ["data-structures", "algorithms"]
